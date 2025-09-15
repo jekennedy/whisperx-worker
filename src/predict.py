@@ -73,9 +73,30 @@ except Exception:
 # Allow runtime override of the model to speed validation or switch sizes.
 # If WHISPERX_MODEL is set (e.g., "small", "medium", "large-v3"), use it directly.
 # Otherwise, fall back to the local preloaded directory if present (WHISPERX_MODEL_DIR or default path).
-_WHISPERX_MODEL_OVERRIDE = os.getenv("WHISPERX_MODEL", "").strip()
-_WHISPERX_MODEL_DIR = os.getenv("WHISPERX_MODEL_DIR", "./models/faster-whisper-large-v3").strip()
-whisper_arch = _WHISPERX_MODEL_OVERRIDE or _WHISPERX_MODEL_DIR
+_WHISPERX_MODEL_OVERRIDE = (
+    os.getenv("WHISPERX_MODEL") or os.getenv("WHISPERX_MODEL_NAME") or ""
+).strip()
+_WHISPERX_MODEL_DIR = os.getenv(
+    "WHISPERX_MODEL_DIR", 
+    "/app/models/faster-whisper-large-v3"
+).strip()
+
+def _resolve_whisper_arch():
+    # If override is set, use it as-is (model name or path)
+    if _WHISPERX_MODEL_OVERRIDE:
+        return _WHISPERX_MODEL_OVERRIDE
+    # Prefer local dir only if it contains a model.bin
+    if _WHISPERX_MODEL_DIR and os.path.isfile(os.path.join(_WHISPERX_MODEL_DIR, "model.bin")):
+        return _WHISPERX_MODEL_DIR
+    # Fallback to model name to trigger auto-download
+    return os.getenv("WHISPERX_MODEL_NAME", "large-v3").strip() or "large-v3"
+
+whisper_arch = _resolve_whisper_arch()
+try:
+    source_kind = "path" if os.path.isabs(whisper_arch) or "/" in whisper_arch else "name"
+    print(f"[Predict] whisper_arch={whisper_arch} ({source_kind})", flush=True)
+except Exception:
+    pass
 
 
 class Output(BaseModel):
