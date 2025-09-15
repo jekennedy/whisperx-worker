@@ -1,9 +1,10 @@
 #!/bin/bash
 set -e  # Exit immediately if a command exits with a non-zero status
 
-# Define cache and model directories
-CACHE_DIR="/cache/models"
-MODELS_DIR="/models"
+# Define cache and model directories (allow override via ENV)
+: "${CACHE_DIR:=/cache/models}"
+: "${MODEL_DIR:=/models}"
+MODELS_DIR="$MODEL_DIR"
 
 # Ensure necessary directories exist
 mkdir -p /root/.cache/torch/hub/checkpoints

@@ -26,12 +26,17 @@ RUN python3 -m pip install --no-cache-dir --no-deps -r /app/requirements.txt
 # src/ should include rp_handler.py and predict.py (your script)
 COPY src/ /app/src/
 
-# ---- Bundle local VAD model (optional, speeds cold starts) ----
-# Keep it both in a known path and in torch cache for libs that look there.
-# Place your file at repo path: models/vad/whisperx-vad-segmentation.bin
-COPY models/vad/whisperx-vad-segmentation.bin /app/models/vad/whisperx-vad-segmentation.bin
-RUN mkdir -p /root/.cache/torch && \
-    cp /app/models/vad/whisperx-vad-segmentation.bin /root/.cache/torch/whisperx-vad-segmentation.bin
+# ---- Bundle local models (optional, speeds cold starts) ----
+# Copy whatever is present under repo ./models into image ./models.
+# If a VAD binary is present at ./models/whisperx-vad-segmentation.bin or ./models/vad/..., place it under ./models/vad.
+COPY models/ /app/models/
+RUN mkdir -p /app/models/vad /root/.cache/torch && \
+    if [ -f /app/models/whisperx-vad-segmentation.bin ]; then \
+      mv /app/models/whisperx-vad-segmentation.bin /app/models/vad/whisperx-vad-segmentation.bin; \
+    fi && \
+    if [ -f /app/models/vad/whisperx-vad-segmentation.bin ]; then \
+      cp /app/models/vad/whisperx-vad-segmentation.bin /root/.cache/torch/whisperx-vad-segmentation.bin; \
+    fi
 ENV VAD_MODEL_PATH=/app/models/vad/whisperx-vad-segmentation.bin
 
 # ---- Pre-download WhisperX model weights (optional but recommended) ----
