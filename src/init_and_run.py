@@ -1,4 +1,5 @@
 import os, pathlib, sys
+from . import rp_handler
 
 for p in [os.getenv("HF_HOME"),
           os.getenv("HUGGINGFACE_HUB_CACHE"),
@@ -13,6 +14,3 @@ print("[INIT] Caches:",
       "TRANSFORMERS_CACHE=", os.getenv("TRANSFORMERS_CACHE"),
       "TORCH_HOME=", os.getenv("TORCH_HOME"),
       flush=True)
-
-# hand off to RunPod serverless loader (imports rp_handler)
-import runpod, src.rp_handler  # noqa: F401
