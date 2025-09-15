@@ -84,20 +84,20 @@ else:
 # -----------------------------------------------------------------------------
 # S3 / R2 client from environment for artifact uploads
 # -----------------------------------------------------------------------------
-SWAMI_STORAGE_ENDPOINT = os.environ.get("SWAMI_STORAGE_ENDPOINT")
-SWAMI_STORAGE_BUCKET   = os.environ.get("SWAMI_STORAGE_BUCKET")
-SWAMI_STORAGE_ACCESS   = os.environ.get("SWAMI_STORAGE_ACCESS_KEY")
-SWAMI_STORAGE_SECRET   = os.environ.get("SWAMI_STORAGE_SECRET_KEY")
+STORAGE_ENDPOINT = os.environ.get("STORAGE_ENDPOINT")
+STORAGE_BUCKET   = os.environ.get("STORAGE_BUCKET")
+STORAGE_ACCESS   = os.environ.get("STORAGE_ACCESS_KEY")
+STORAGE_SECRET   = os.environ.get("STORAGE_SECRET_KEY")
 PREFIX_TRANSCRIPTS     = os.environ.get("PREFIX_TRANSCRIPTS", "transcripts/")
 
 _s3 = None
-if all([SWAMI_STORAGE_ENDPOINT, SWAMI_STORAGE_BUCKET, SWAMI_STORAGE_ACCESS, SWAMI_STORAGE_SECRET]):
+if all([STORAGE_ENDPOINT, STORAGE_BUCKET, STORAGE_ACCESS, STORAGE_SECRET]):
     try:
         _s3 = boto3.client(
             "s3",
-            endpoint_url=SWAMI_STORAGE_ENDPOINT,
-            aws_access_key_id=SWAMI_STORAGE_ACCESS,
-            aws_secret_access_key=SWAMI_STORAGE_SECRET,
+            endpoint_url=STORAGE_ENDPOINT,
+            aws_access_key_id=STORAGE_ACCESS,
+            aws_secret_access_key=STORAGE_SECRET,
         )
         logger.info("Initialized S3/R2 client for artifact uploads.")
     except Exception:
@@ -136,7 +136,7 @@ def _stem_from(path_or_url: str) -> str:
 
 def _put_text(key: str, text: str, content_type: str):
     _s3.put_object(
-        Bucket=SWAMI_STORAGE_BUCKET,
+        Bucket=STORAGE_BUCKET,
         Key=key,
         Body=text.encode("utf-8"),
         ContentType=content_type,
@@ -144,7 +144,7 @@ def _put_text(key: str, text: str, content_type: str):
 
 def _put_json(key: str, obj):
     _s3.put_object(
-        Bucket=SWAMI_STORAGE_BUCKET,
+        Bucket=STORAGE_BUCKET,
         Key=key,
         Body=json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8"),
         ContentType="application/json",
