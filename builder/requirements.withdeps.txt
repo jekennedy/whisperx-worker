@@ -3,6 +3,7 @@ boto3
 requests
 python-dotenv
 huggingface_hub
+safetensors>=0.4.1
 pandas
 numpy
 soundfile
