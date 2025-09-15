@@ -249,10 +249,10 @@ class Predictor(BasePredictor):
             del model
 
             if align_output:
-                if detected_language in whisperx.alignment.DEFAULT_ALIGN_MODELS_TORCH or detected_language in whisperx.alignment.DEFAULT_ALIGN_MODELS_HF:
+                try:
                     result = align(audio, result, debug)
-                else:
-                    print(f"Cannot align output as language {detected_language} is not supported for alignment")
+                except Exception as e:
+                    print(f"[Predict] alignment skipped: {e}", flush=True)
 
             if diarization:
                 result = diarize(audio, result, debug, huggingface_access_token, min_speakers, max_speakers)
