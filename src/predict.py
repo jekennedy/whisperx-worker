@@ -16,7 +16,6 @@ import whisperx
 import tempfile
 import time
 import torch
-from src import speaker_processing
 
 
 import logging

@@ -13,28 +13,46 @@ import logging
 import librosa
 import torch, numpy as np
 from speechbrain.pretrained import EncoderClassifier
-# -----------------------------------------------------------------
-# Load the pyannote embedding model once globally
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EMBED_MODEL = Inference("pyannote/embedding", device=DEVICE)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# at top of rp_handler.py (or speaker_processing.py)
-from dotenv import load_dotenv, find_dotenv
-import os
-# find and load your .env file
-load_dotenv(find_dotenv())
-HF_TOKEN = os.getenv("HF_TOKEN") 
+# Lazy embedder to avoid gated downloads at import time
+_EMBEDDER = None
+def get_embedder(huggingface_access_token: str | None = None):
+    global _EMBEDDER
+    if _EMBEDDER is not None:
+        return _EMBEDDER
+    token = huggingface_access_token or os.getenv("HF_TOKEN")
+    try:
+        _EMBEDDER = Inference("pyannote/embedding", use_auth_token=token, device=device)
+        return _EMBEDDER
+    except Exception as e:
+        logger = logging.getLogger("speaker_processing")
+        logger.error(f"Failed to initialize pyannote embedder: {e}")
+        return None
 
-ecapa = EncoderClassifier.from_hparams(
-    source="speechbrain/spkrec-ecapa-voxceleb",
-    run_opts={"device": device},
-)
+# at top of rp_handler.py (or speaker_processing.py)
+try:
+    from dotenv import load_dotenv, find_dotenv
+    load_dotenv(find_dotenv())
+except Exception:
+    pass
+
+_ECAPA = None
+def get_ecapa():
+    global _ECAPA
+    if _ECAPA is not None:
+        return _ECAPA
+    _ECAPA = EncoderClassifier.from_hparams(
+        source="speechbrain/spkrec-ecapa-voxceleb",
+        run_opts={"device": device},
+    )
+    return _ECAPA
 
 def spk_embed(wave_16k_mono: np.ndarray) -> np.ndarray:
     """Return 192-D embedding for one mono waveform @16 kHz."""
     wav = torch.tensor(wave_16k_mono).unsqueeze(0).to(device)
-    return ecapa.encode_batch(wav).squeeze(0).cpu().numpy()
+    model = get_ecapa()
+    return model.encode_batch(wav).squeeze(0).cpu().numpy()
 # -----------------------------------------------------------------
 #  Select GPU when available, otherwise fall back to CPU once
 # ------------------------------------------------------------------
@@ -393,9 +411,12 @@ from scipy.spatial.distance import cdist
 
 
 
-def embed_waveform(wav: np.ndarray, sr: int = 16000) -> np.ndarray:
+def embed_waveform(wav: np.ndarray, sr: int = 16000, huggingface_access_token: str | None = None) -> np.ndarray:
     """Return a 512-dim L2-normalized embedding for a waveform."""
-    feat = EMBED_MODEL({"waveform": torch.tensor(wav).unsqueeze(0), "sample_rate": sr})
+    embedder = get_embedder(huggingface_access_token)
+    if embedder is None:
+        raise RuntimeError("pyannote embedder not available; ensure HF_TOKEN is set and access is granted")
+    feat = embedder({"waveform": torch.tensor(wav).unsqueeze(0), "sample_rate": sr})
     if hasattr(feat, "data"):
         arr = feat.data.mean(axis=0)
     else:
@@ -403,7 +424,7 @@ def embed_waveform(wav: np.ndarray, sr: int = 16000) -> np.ndarray:
     arr = arr.astype(np.float32)
     return arr / np.linalg.norm(arr)
 
-def enroll_profiles(profiles: list[dict]) -> dict[str, np.ndarray]:
+def enroll_profiles(profiles: list[dict], huggingface_access_token: str | None = None) -> dict[str, np.ndarray]:
     """
     Enroll speaker profiles from provided audio samples.
     profiles: [{"name":"Alice", "file_path":"/…/alice.wav"}, …]
@@ -412,14 +433,15 @@ def enroll_profiles(profiles: list[dict]) -> dict[str, np.ndarray]:
     embeddings = {}
     for p in profiles:
         wav, sr = librosa.load(p["file_path"], sr=16000, mono=True)
-        embeddings[p["name"]] = embed_waveform(wav, sr)
+        embeddings[p["name"]] = embed_waveform(wav, sr, huggingface_access_token=huggingface_access_token)
     return embeddings
 
 def identify_speakers_on_segments(
     segments: list[dict],
     audio_path: str,
     enrolled: dict[str, np.ndarray],
-    threshold: float = 0.1
+    threshold: float = 0.1,
+    huggingface_access_token: str | None = None
 ) -> list[dict]:
     """
     Identify speakers on diarized segments using enrolled embeddings.
@@ -433,7 +455,7 @@ def identify_speakers_on_segments(
         wav, sr = librosa.load(audio_path, sr=16000, mono=True,
                                offset=seg["start"],
                                duration=seg["end"] - seg["start"])
-        emb = embed_waveform(wav, sr)
+        emb = embed_waveform(wav, sr, huggingface_access_token=huggingface_access_token)
         sims = 1 - cdist(emb[None,:], mat, metric="cosine")[0]
         best = sims.argmax()
         if sims[best] >= threshold:

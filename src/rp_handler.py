@@ -230,6 +230,7 @@ def run(job):
                 audio_path=audio_file_path,
                 enrolled=embeddings,
                 threshold=0.1,
+                huggingface_access_token=job_input.get("huggingface_access_token") or hf_token,
             )
             segments_with_final_labels = relabel_speakers_by_avg_similarity(segments_with_speakers)
             output_dict["segments"] = segments_with_final_labels
