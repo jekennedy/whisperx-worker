@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import boto3
 import runpod
 from runpod.serverless.utils.rp_validator import validate
-from runpod.serverless.utils import download_files_from_urls, rp_cleanup, rp_return
+from runpod.serverless.utils import download_files_from_urls, rp_cleanup
 
 from rp_schema import INPUT_VALIDATIONS
 from predict import Predictor, Output
@@ -38,6 +38,11 @@ from speaker_processing import (
 # -----------------------------------------------------------------------------
 load_dotenv(find_dotenv())
 
+# If a bundled VAD model is present, advertise it to downstream code
+VAD_MODEL_PATH = os.getenv("VAD_MODEL_PATH")
+if VAD_MODEL_PATH and os.path.isfile(VAD_MODEL_PATH):
+    os.environ["VAD_MODEL_PATH"] = VAD_MODEL_PATH
+
 logger = logging.getLogger("rp_handler")
 logger.setLevel(logging.DEBUG)
 
@@ -62,6 +67,11 @@ def spk_embed(wave_16k_mono: np.ndarray) -> np.ndarray:
 
 def to_numpy(x):
     return x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else np.asarray(x)
+
+
+if VAD_MODEL_PATH and os.path.isfile(VAD_MODEL_PATH):
+    logger.info(f"Using bundled VAD model: {VAD_MODEL_PATH}")
+
 
 # -----------------------------------------------------------------------------
 # Hugging Face auth (optional)
@@ -277,6 +287,6 @@ def run(job):
     except Exception:
         logger.warning("Cleanup issue", exc_info=True)
 
-    return rp_return({"output": small_output})
+    return {"output": small_output}
 
 runpod.serverless.start({"handler": run})
