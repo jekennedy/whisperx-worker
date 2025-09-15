@@ -45,8 +45,31 @@ logger.addHandler(file_handler)
 
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cuda.matmul.allow_tf32 = True
-compute_type = "float16"  # change to "int8" if low on GPU mem (may reduce accuracy)
-device = "cuda"
+
+# Device selection: honor WHISPERX_DEVICE when set; otherwise auto-detect.
+# Values: "cpu", "cuda", "auto" (default). "cuda" falls back to cpu if unavailable.
+_DEVICE_ENV = os.getenv("WHISPERX_DEVICE", "auto").strip().lower()
+
+def _resolve_device():
+    if _DEVICE_ENV == "cpu":
+        return "cpu"
+    if _DEVICE_ENV == "cuda":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    # auto
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+device = _resolve_device()
+
+# Choose compute_type appropriate to device: GPU -> float16, CPU -> int8
+compute_type = "float16" if device == "cuda" else "int8"
+
+try:
+    forced = os.getenv("WHISPERX_DEVICE")
+    if forced == "cuda" and device != "cuda":
+        print("[Predict] Requested CUDA but not available; falling back to CPU", flush=True)
+    print(f"[Predict] device={device} compute_type={compute_type}", flush=True)
+except Exception:
+    pass
 
 # Allow runtime override of the model to speed validation or switch sizes.
 # If WHISPERX_MODEL is set (e.g., "small", "medium", "large-v3"), use it directly.

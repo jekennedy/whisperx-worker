@@ -1,6 +1,12 @@
 # src/rp_handler.py
 
-from dotenv import load_dotenv, find_dotenv
+try:
+    from dotenv import load_dotenv, find_dotenv
+except Exception:  # Graceful fallback when running outside the image
+    def load_dotenv(*args, **kwargs):
+        return False
+    def find_dotenv(*args, **kwargs):
+        return ""
 import os
 import sys
 import json
@@ -26,7 +32,10 @@ import numpy as np
 # -----------------------------------------------------------------------------
 # Env and logging
 # -----------------------------------------------------------------------------
-load_dotenv(find_dotenv())
+try:
+    load_dotenv(find_dotenv())
+except Exception:
+    pass
 
 # If a bundled VAD model is present, advertise it to downstream code
 VAD_MODEL_PATH = os.getenv("VAD_MODEL_PATH")
