@@ -22,17 +22,14 @@ RUN python3 -m pip install -U pip wheel && \
         torch torchvision torchaudio
 
 # Python deps (leave Torch to step above)
-COPY builder/requirements.txt /app/requirements.txt
+COPY builder/requirements.withdeps.txt /app/requirements.withdeps.txt
+COPY builder/requirements.nodeps.txt /app/requirements.nodeps.txt
 
-# Install general libs WITH dependencies to avoid missing transitives
-# Keep heavy ML libs pinned and installed later without deps
-RUN python3 -m pip install --no-cache-dir \
-    runpod boto3 requests python-dotenv \
-    pandas numpy soundfile librosa \
-    nltk aiohttp aiosignal frozenlist multidict yarl attrs
+# 1) General libs WITH dependencies (avoids whack-a-mole transitives)
+RUN python3 -m pip install --no-cache-dir -r /app/requirements.withdeps.txt
 
-# Install project requirements WITHOUT deps (prevents repinning torch etc.)
-RUN python3 -m pip install --no-cache-dir --no-deps -r /app/requirements.txt
+# 2) Heavy ML libs WITHOUT dependencies (prevents repinning torch etc.)
+RUN python3 -m pip install --no-cache-dir --no-deps -r /app/requirements.nodeps.txt
 
 # Sanity check
 RUN python3 - <<'PY'

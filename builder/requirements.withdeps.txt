@@ -1,0 +1,16 @@
+runpod
+boto3
+requests
+python-dotenv
+huggingface_hub
+pandas
+numpy
+soundfile
+librosa
+nltk
+aiohttp
+aiosignal
+frozenlist
+multidict
+yarl
+attrs
