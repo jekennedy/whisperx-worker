@@ -20,7 +20,18 @@ RUN python3 -m pip install -U pip wheel && \
 
 # ---- Python deps (leave Torch to the base step above) ----
 COPY builder/requirements.txt /app/requirements.txt
+
+# 1) Install RunPod SDK WITH dependencies so aiohttp and friends are present at boot
+RUN python3 -m pip install --no-cache-dir runpod
+
+# 2) Now install project deps WITHOUT deps (so WhisperX doesn't repin torch)
 RUN python3 -m pip install --no-cache-dir --no-deps -r /app/requirements.txt
+
+# (optional) sanity check during build
+RUN python3 - <<'PY'
+import runpod, aiohttp
+print("runpod OK, aiohttp OK")
+PY
 
 # ---- App code ----
 # src/ should include rp_handler.py and predict.py (your script)
@@ -69,5 +80,4 @@ RUN mkdir -p /app/models/faster-whisper-large-v3
 ENV WHISPERX_MODEL_DIR=/app/models/faster-whisper-large-v3
 
 # ---- Entrypoint ----
-# RunPod imports the handler; keep module import simple.
-CMD ["python3", "-c", "import runpod, src.rp_handler"]
+CMD ["python3", "-u", "/app/src/init_and_run.py"]
