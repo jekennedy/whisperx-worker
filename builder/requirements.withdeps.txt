@@ -4,6 +4,7 @@ requests
 python-dotenv
 huggingface_hub
 safetensors>=0.4.1
+ffmpeg-python>=0.2.0
 pandas
 numpy
 soundfile
