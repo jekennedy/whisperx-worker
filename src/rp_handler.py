@@ -13,25 +13,15 @@ import runpod
 from runpod.serverless.utils.rp_validator import validate
 from runpod.serverless.utils import download_files_from_urls, rp_cleanup
 
-from rp_schema import INPUT_VALIDATIONS
-from predict import Predictor, Output
+from src.rp_schema import INPUT_VALIDATIONS
+from src.predict import Predictor, Output
 
 # Optional HF login for diarization or gated models
 from huggingface_hub import login, whoami
 import torch
 import numpy as np
-from speechbrain.pretrained import EncoderClassifier  # type: ignore
 
-# Speaker helpers
-from speaker_profiles import load_embeddings, relabel
-from speaker_processing import (
-    process_diarized_output,
-    enroll_profiles,
-    identify_speakers_on_segments,
-    load_known_speakers_from_samples,
-    identify_speaker,
-    relabel_speakers_by_avg_similarity,
-)
+# Speaker helpers will be imported lazily inside functions to avoid heavy deps during module import
 
 # -----------------------------------------------------------------------------
 # Env and logging
@@ -60,13 +50,6 @@ logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-def spk_embed(wave_16k_mono: np.ndarray) -> np.ndarray:
-    wav = torch.tensor(wave_16k_mono).unsqueeze(0).to(device)
-    return ecapa.encode_batch(wav).squeeze(0).cpu().numpy()
-
-def to_numpy(x):
-    return x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else np.asarray(x)
 
 
 if VAD_MODEL_PATH and os.path.isfile(VAD_MODEL_PATH):
@@ -183,6 +166,12 @@ def run(job):
     speaker_profiles = job_input.get("speaker_samples", [])
     embeddings = {}
     if speaker_profiles:
+        # Lazy import heavy modules only if needed
+        from src.speaker_processing import (
+            load_known_speakers_from_samples,
+            identify_speakers_on_segments,
+            relabel_speakers_by_avg_similarity,
+        )
         try:
             embeddings = load_known_speakers_from_samples(
                 speaker_profiles,
@@ -224,6 +213,8 @@ def run(job):
 
     # 4) Optional speaker identification on segments
     if embeddings:
+        # Import here as well to keep top-level import light
+        from src.speaker_processing import identify_speakers_on_segments, relabel_speakers_by_avg_similarity
         try:
             segments_with_speakers = identify_speakers_on_segments(
                 segments=output_dict["segments"],

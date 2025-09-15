@@ -2,9 +2,9 @@
 try:
     # Prefer real cog if present (e.g. when running locally)
     from cog import BasePredictor, Input, Path, BaseModel
-except ImportError:                          # pragma: no cover
-    from cog_stub import BasePredictor, Input, Path, BaseModel
-from pydub import AudioSegment
+except ImportError:  # pragma: no cover
+    # Fallback to local stub within the src package
+    from src.cog_stub import BasePredictor, Input, Path, BaseModel
 from typing import Any
 from whisperx.audio import N_SAMPLES, log_mel_spectrogram
 from scipy.spatial.distance import cosine
@@ -16,7 +16,7 @@ import whisperx
 import tempfile
 import time
 import torch
-import speaker_processing
+from src import speaker_processing
 
 
 import logging
@@ -218,8 +218,10 @@ class Predictor(BasePredictor):
 
 
 def get_audio_duration(file_path):
-    
-    return len(AudioSegment.from_file(file_path))
+    import librosa
+    # duration in seconds → convert to milliseconds
+    d = librosa.get_duration(filename=str(file_path))
+    return int(d * 1000)
 
 
 def detect_language(full_audio_file_path, segments_starts, language_detection_min_prob,
@@ -270,20 +272,34 @@ def detect_language(full_audio_file_path, segments_starts, language_detection_mi
 
 
 def extract_audio_segment(input_file_path, start_time_ms, duration_ms):
+    """
+    Extract a segment using librosa/soundfile to avoid AudioSegment/pyaudioop.
+    Returns a temporary file path with the same extension as the input.
+    """
+    import librosa
+    import soundfile as sf
+    from pathlib import Path
+
     input_file_path = Path(input_file_path) if not isinstance(input_file_path, Path) else input_file_path
 
-    audio = AudioSegment.from_file(input_file_path)
+    offset_s = start_time_ms / 1000.0
+    duration_s = duration_ms / 1000.0
 
-    end_time_ms = start_time_ms + duration_ms
-    extracted_segment = audio[start_time_ms:end_time_ms]
+    # Preserve original sampling rate; mono=False preserves channels
+    y, sr = librosa.load(str(input_file_path), sr=None, mono=False, offset=offset_s, duration=duration_s)
 
-    file_extension = input_file_path.suffix
+    # librosa returns (n,) or (channels, n); soundfile expects (n,) or (n, channels)
+    if y.ndim == 2:
+        y_to_write = y.T
+    else:
+        y_to_write = y
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
-        temp_file_path = Path(temp_file.name)
-        extracted_segment.export(temp_file_path, format=file_extension.lstrip('.'))
+    suffix = input_file_path.suffix or ".wav"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp_path = Path(tmp.name)
+        sf.write(str(tmp_path), y_to_write, sr)
 
-    return temp_file_path
+    return tmp_path
 
 
 def distribute_segments_equally(total_duration, segments_duration, iterations):

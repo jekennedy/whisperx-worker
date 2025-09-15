@@ -6,6 +6,10 @@ pandas
 numpy
 soundfile
 librosa
-ctranslate2>=4.6.0
-# install WhisperX without deps so Torch stays what the image provided
+ctranslate2==4.6.0
+faster-whisper==1.0.3
+transformers==4.45.2
+tokenizers==0.20.3
+sentencepiece>=0.1.99
+nltk==3.9.1
 whisperx @ git+https://github.com/m-bain/whisperx.git@v3.1.1
