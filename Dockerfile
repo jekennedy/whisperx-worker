@@ -24,10 +24,14 @@ RUN python3 -m pip install -U pip wheel && \
 # Python deps (leave Torch to step above)
 COPY builder/requirements.txt /app/requirements.txt
 
-# 1) Install RunPod SDK WITH dependencies so aiohttp and friends are present at boot
-RUN python3 -m pip install --no-cache-dir runpod
+# Install general libs WITH dependencies to avoid missing transitives
+# Keep heavy ML libs pinned and installed later without deps
+RUN python3 -m pip install --no-cache-dir \
+    runpod boto3 requests python-dotenv \
+    pandas numpy soundfile librosa \
+    nltk aiohttp aiosignal frozenlist multidict yarl attrs
 
-# 2) Now install project deps WITHOUT deps (so WhisperX doesn't repin torch)
+# Install project requirements WITHOUT deps (prevents repinning torch etc.)
 RUN python3 -m pip install --no-cache-dir --no-deps -r /app/requirements.txt
 
 # Sanity check

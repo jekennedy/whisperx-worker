@@ -3,6 +3,8 @@ boto3
 requests
 python-dotenv
 pandas
+python-dateutil>=2.8.2
+pytz
 numpy
 soundfile
 librosa
