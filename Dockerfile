@@ -21,6 +21,7 @@ RUN python3 -m pip install -U pip wheel && \
 # ---- Python deps (leave Torch to the base step above) ----
 COPY builder/requirements.txt /app/requirements.txt
 RUN python3 -m pip install --no-cache-dir --no-deps -r /app/requirements.txt
+RUN python3 -m pip install --no-cache-dir aiohttp
 
 # ---- App code ----
 # src/ should include rp_handler.py and predict.py (your script)
