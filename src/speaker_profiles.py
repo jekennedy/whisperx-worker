@@ -1,82 +1,109 @@
 # speaker_profiles.py
-# speaker_profiles.py  ---------------------------------------------
-import os, tempfile, requests, numpy as np, torch, librosa
+import os
+import tempfile
+import requests
+import numpy as np
+import torch
+import librosa
+from scipy.spatial.distance import cdist
 from pyannote.audio import Inference
 
+# Device selection
 _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-_EMBED  = Inference(
+
+# Hugging Face token (needed for gated pyannote models)
+_HF_TOKEN = os.getenv("HF_TOKEN", "").strip() or None
+
+# Pyannote speaker embedding model (512-D)
+_EMBED = Inference(
     "pyannote/embedding",
     device=_DEVICE,
-    use_auth_token=os.getenv("HF_TOKEN")
+    use_auth_token=_HF_TOKEN
 )
 
-_CACHE = {}                                   # name → 512-D vector
+# In-memory cache: name -> 512-D normalized vector
+_CACHE: dict[str, np.ndarray] = {}
 
-# ---------------------------------------------------------------------
-# 1)  Download profile audio (once)  → 128-D embedding  → cache
-# ---------------------------------------------------------------------
-
-
-def _l2(x: np.ndarray) -> np.ndarray:         # handy normaliser
-    return x / np.linalg.norm(x)
-
+def _l2(x: np.ndarray) -> np.ndarray:
+    """L2-normalize a vector."""
+    n = np.linalg.norm(x)
+    return x if n == 0 else (x / n)
 
 def load_embeddings(profiles):
     """
-    >>> load_embeddings([{"name":"alice","url":"https://…/alice.wav"}, …])
-    returns {'alice': 512-D np.array, …}
+    Load and cache 512-D speaker embeddings for given profiles.
+
+    profiles: [{"name": "alice", "url": "https://.../alice.wav"}, ...]
+
+    returns: {"alice": np.ndarray(shape=(512,)), ...}
     """
     out = {}
     for p in profiles:
-        name, url = p["name"], p["url"]
+        name = p["name"]
+        url  = p["url"]
         if name in _CACHE:
             out[name] = _CACHE[name]
             continue
 
+        # Download to a temp WAV/MP3 and compute embedding
         with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
-            tmp.write(requests.get(url, timeout=30).content)
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            tmp.write(resp.content)
             tmp.flush()
-            wav, _   = librosa.load(tmp.name, sr=16_000, mono=True)
-            vec      = _EMBED(torch.tensor(wav).unsqueeze(0)).cpu().numpy().flatten()
-            vec      = _l2(vec)
-            _CACHE[name] = vec
-            out[name]   = vec
+
+            wav, _sr = librosa.load(tmp.name, sr=16_000, mono=True)
+            with torch.no_grad():
+                emb = _EMBED(torch.tensor(wav).unsqueeze(0)).cpu().numpy().reshape(-1)  # 512-D
+            emb = _l2(emb)
+            _CACHE[name] = emb
+            out[name] = emb
     return out
 
-
-
-# ---------------------------------------------------------------------
-# 2)  Replace diarization labels with closest profile name
-# ---------------------------------------------------------------------
 def relabel(diarize_df, transcription, embeds, threshold=0.75):
     """
-    diarize_df   = pd.DataFrame from your DiarizationPipeline
-    transcription= dict with 'segments' list   (output of WhisperX)
-    embeds       = {"gin": vec128, ...}
-    """
-    names    = list(embeds.keys())
-    vecstack = np.stack(list(embeds.values()))        # (N,128)
+    Replace diarization labels in 'transcription' with closest profile name.
 
-    for seg in transcription["segments"]:
-        dia_spk = seg.get("speaker")                  # e.g. SPEAKER_00
+    diarize_df:    pd.DataFrame from a DiarizationPipeline (unused here but kept for API parity)
+    transcription: dict with a 'segments' list (WhisperX output); each segment may have:
+                   - 'speaker': diarization label like 'SPEAKER_00'
+                   - 'words': list of words with optional 'speaker' and 'embedding'
+    embeds:        dict of known embeddings {"alice": vec512, ...}
+    threshold:     cosine similarity threshold (0..1)
+
+    returns: updated transcription
+    """
+    if not embeds:
+        return transcription
+
+    names = list(embeds.keys())
+    vecstack = np.stack(list(embeds.values()))  # (N, 512)
+
+    segs = transcription.get("segments") or []
+    for seg in segs:
+        dia_spk = seg.get("speaker")
         if not dia_spk:
             continue
 
-        # --- approximate segment embedding: mean of word embeddings ----
-        word_vecs = [w.get("embedding")
-                     for w in seg.get("words", [])
-                     if w.get("speaker") == dia_spk and w.get("embedding") is not None]
-
+        # Gather embeddings from words that belong to the diarized speaker
+        word_vecs = [
+            w.get("embedding")
+            for w in seg.get("words", [])
+            if w.get("speaker") == dia_spk and w.get("embedding") is not None
+        ]
         if not word_vecs:
             continue
 
-        centroid = np.mean(word_vecs, axis=0, keepdims=True)   # (1,128)
-        sim      = 1 - cdist(centroid, vecstack, metric="cosine")
+        centroid = np.mean(word_vecs, axis=0, keepdims=True)  # (1, 512)
+        sim = 1.0 - cdist(centroid, vecstack, metric="cosine")  # similarity = 1 - distance
         best_idx = int(sim.argmax())
-        if sim[0, best_idx] >= threshold:
+        best_sim = float(sim[0, best_idx])
+        if best_sim >= threshold:
             real = names[best_idx]
             seg["speaker"] = real
-            seg["similarity"] = float(sim[0, best_idx])
+            seg["similarity"] = best_sim
             for w in seg.get("words", []):
-                w["speaker"] = real
+                # overwrite diarization label with verified identity
+                if w.get("speaker") == dia_spk:
+                    w["speaker"] = real
     return transcription
