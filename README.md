@@ -212,6 +212,37 @@ The service returns a JSON object structured as follows:
 docker build -t your-username/whisperx-worker:your-tag .
 ```
 
+### Build Options (models and caching)
+
+- Optional preloading (default off):
+  - The Dockerfile supports baking model weights into the image, but this is disabled by default for fast builds and smaller images.
+  - To enable preloading and speed up cold starts, pass a build arg and (optionally) an HF token secret.
+
+- Fast build (no preloading):
+  - `DOCKER_BUILDKIT=1 docker build -t your/worker:fast .`
+
+- Preload models (uses BuildKit cache, repeat builds are faster):
+  - `DOCKER_BUILDKIT=1 docker build \`
+    `  --build-arg PRELOAD_MODELS=1 \`
+    `  --secret id=hf_token,src=./hf_token.txt \`
+    `  -t your/worker:preloaded .`
+
+- Notes:
+  - BuildKit cache mounts keep downloads out of final layers while reusing them across builds.
+  - If you do not preload, the first runtime call will download models automatically.
+
+### Runtime Model Selection
+
+- You can select a smaller model at runtime for quick validation without rebuilding:
+  - Set env `WHISPERX_MODEL=small` (or `medium`, `large-v3`, etc.).
+  - If unset, the worker uses any preloaded local path (`WHISPERX_MODEL_DIR`, default `/app/models/faster-whisper-large-v3`).
+
+### Bundled VAD Model (optional)
+
+- To speed up VAD initialization, you may include the VAD file in the repo:
+  - Place at `models/whisperx-vad-segmentation.bin` or `models/vad/whisperx-vad-segmentation.bin`.
+  - The Dockerfile normalizes it to `/app/models/vad/whisperx-vad-segmentation.bin` and sets `VAD_MODEL_PATH` accordingly.
+
 ## License
 
 This project is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.

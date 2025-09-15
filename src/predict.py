@@ -47,7 +47,13 @@ torch.backends.cudnn.allow_tf32 = True
 torch.backends.cuda.matmul.allow_tf32 = True
 compute_type = "float16"  # change to "int8" if low on GPU mem (may reduce accuracy)
 device = "cuda"
-whisper_arch = "./models/faster-whisper-large-v3"
+
+# Allow runtime override of the model to speed validation or switch sizes.
+# If WHISPERX_MODEL is set (e.g., "small", "medium", "large-v3"), use it directly.
+# Otherwise, fall back to the local preloaded directory if present (WHISPERX_MODEL_DIR or default path).
+_WHISPERX_MODEL_OVERRIDE = os.getenv("WHISPERX_MODEL", "").strip()
+_WHISPERX_MODEL_DIR = os.getenv("WHISPERX_MODEL_DIR", "./models/faster-whisper-large-v3").strip()
+whisper_arch = _WHISPERX_MODEL_OVERRIDE or _WHISPERX_MODEL_DIR
 
 
 class Output(BaseModel):

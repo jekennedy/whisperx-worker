@@ -47,11 +47,22 @@ ENV VAD_MODEL_PATH=/app/models/vad/whisperx-vad-segmentation.bin
 # If you don't have this script, skip this block; WhisperX will download at runtime.
 COPY builder/download_models.sh /app/builder/download_models.sh
 RUN chmod +x /app/builder/download_models.sh
+ARG PRELOAD_MODELS=0
 ENV MODEL_DIR=/app/models \
     WHISPERX_MODEL_NAME=faster-whisper-large-v3
-# If you pass a secret at build time: DOCKER_BUILDKIT=1 docker build --secret id=hf_token,src=./hf_token.txt ...
+# Enable optional preloading with BuildKit cache mounts; off by default.
+# Pass HF token at build with: --secret id=hf_token,src=./hf_token.txt
 RUN --mount=type=secret,id=hf_token \
-    bash -lc 'export HF_TOKEN="$( [ -f /run/secrets/hf_token ] && cat /run/secrets/hf_token || true )"; /app/builder/download_models.sh'
+    --mount=type=cache,target=/cache/models \
+    --mount=type=cache,target=/cache/hf \
+    bash -lc '\
+      if [[ "$PRELOAD_MODELS" == "1" ]]; then \
+        export HF_TOKEN="$( [ -f /run/secrets/hf_token ] && cat /run/secrets/hf_token || true )"; \
+        export HF_HOME=/cache/hf; \
+        /app/builder/download_models.sh; \
+      else \
+        echo "Skipping model pre-download (PRELOAD_MODELS=0)"; \
+      fi'
 
 # Ensure the path used in predict.py exists even if the script skipped
 RUN mkdir -p /app/models/faster-whisper-large-v3
