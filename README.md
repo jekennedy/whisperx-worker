@@ -252,6 +252,3 @@ This project is licensed under the Apache License, Version 2.0. See the [LICENSE
 - This project utilizes code from [WhisperX](https://github.com/m-bain/whisperX), licensed under the BSD-2-Clause license
 - Special thanks to the RunPod team for the serverless platform
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
