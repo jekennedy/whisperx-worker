@@ -19,7 +19,7 @@ RUN python3 -m pip install -U pip wheel && \
         torch torchvision torchaudio
 
 # ---- Python deps (leave Torch to the base step above) ----
-COPY requirements.txt /app/requirements.txt
+COPY builder/requirements.txt /app/requirements.txt
 RUN python3 -m pip install --no-cache-dir --no-deps -r /app/requirements.txt
 
 # ---- App code ----
