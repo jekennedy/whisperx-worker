@@ -15,6 +15,7 @@ import logging
 from urllib.parse import urlparse
 
 import boto3
+from botocore.client import Config
 import runpod
 from runpod.serverless.utils.rp_validator import validate
 from runpod.serverless.utils import download_files_from_urls, rp_cleanup
@@ -91,6 +92,7 @@ STORAGE_BUCKET   = os.environ.get("STORAGE_BUCKET")
 STORAGE_ACCESS   = os.environ.get("STORAGE_ACCESS_KEY")
 STORAGE_SECRET   = os.environ.get("STORAGE_SECRET_KEY")
 PREFIX_TRANSCRIPTS     = os.environ.get("PREFIX_TRANSCRIPTS", "transcripts/")
+PRESIGN_TTL = int(os.environ.get("PRESIGN_TTL", "3600"))
 
 _s3 = None
 if all([STORAGE_ENDPOINT, STORAGE_BUCKET, STORAGE_ACCESS, STORAGE_SECRET]):
@@ -100,6 +102,7 @@ if all([STORAGE_ENDPOINT, STORAGE_BUCKET, STORAGE_ACCESS, STORAGE_SECRET]):
             endpoint_url=STORAGE_ENDPOINT,
             aws_access_key_id=STORAGE_ACCESS,
             aws_secret_access_key=STORAGE_SECRET,
+            config=Config(signature_version="s3v4"),
         )
         logger.info("Initialized S3/R2 client for artifact uploads.")
     except Exception:
@@ -152,6 +155,47 @@ def _put_json(key: str, obj):
         ContentType="application/json",
     )
 
+def _presign_get(key: str) -> str:
+    return _s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": STORAGE_BUCKET, "Key": key},
+        ExpiresIn=PRESIGN_TTL,
+    )
+
+def _sanitize_for_json(obj):
+    """Recursively convert numpy types and other non-JSON-serializable values."""
+    try:
+        import numpy as _np
+    except Exception:  # pragma: no cover
+        _np = None
+
+    if isinstance(obj, dict):
+        return {str(k): _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    if _np is not None:
+        if isinstance(obj, (_np.integer,)):
+            return int(obj)
+        if isinstance(obj, (_np.floating,)):
+            return float(obj)
+        if isinstance(obj, (_np.bool_,)):
+            return bool(obj)
+        if isinstance(obj, _np.ndarray):
+            return obj.tolist()
+    # Torch tensors occasionally sneak in; convert to list if small otherwise to float/int when scalar
+    if hasattr(obj, "detach") and hasattr(obj, "cpu"):
+        try:
+            arr = obj.detach().cpu().numpy()
+            return _sanitize_for_json(arr)
+        except Exception:
+            return str(obj)
+    if isinstance(obj, (bytes, bytearray)):
+        try:
+            return obj.decode("utf-8", errors="replace")
+        except Exception:
+            return str(obj)
+    return obj
+
 # -----------------------------------------------------------------------------
 # Main handler
 # -----------------------------------------------------------------------------
@@ -162,6 +206,11 @@ def run(job):
     validated = validate(job_input, INPUT_VALIDATIONS)
     if "errors" in validated:
         return {"error": validated["errors"]}
+
+    # Optional tiny smoke response to validate control-plane return path
+    if os.getenv("FORCE_TINY_OUTPUT", "").strip().lower() in {"1", "true", "yes", "on"}:
+        logger.info("FORCE_TINY_OUTPUT enabled; returning minimal payload.")
+        return {"output": {"ok": True, "note": "tiny"}}
 
     # 1) Download primary audio
     try:
@@ -244,9 +293,27 @@ def run(job):
 
     if _s3:
         try:
+            # Full transcript (primary JSON)
+            transcript_obj = {
+                "segments": _sanitize_for_json(output_dict["segments"]),
+                "detected_language": output_dict.get("detected_language"),
+            }
+            transcript_key = f"{PREFIX_TRANSCRIPTS}{stem}.json"
+            _put_json(transcript_key, transcript_obj)
+            artifacts["transcript_key"] = transcript_key
+            try:
+                artifacts["transcript_url"] = _presign_get(transcript_key)
+            except Exception:
+                logger.debug("Presign transcript failed; continuing without URL", exc_info=True)
+
+            # Also write segments-only JSON for compatibility
             seg_key = f"{PREFIX_TRANSCRIPTS}{stem}.segments.json"
-            _put_json(seg_key, output_dict["segments"])
+            _put_json(seg_key, transcript_obj["segments"])
             artifacts["segments_key"] = seg_key
+            try:
+                artifacts["segments_url"] = _presign_get(seg_key)
+            except Exception:
+                logger.debug("Presign segments failed; continuing without URL", exc_info=True)
         except Exception:
             logger.error("Failed uploading segments JSON", exc_info=True)
 
@@ -256,6 +323,10 @@ def run(job):
                 srt_key = f"{PREFIX_TRANSCRIPTS}{stem}.srt"
                 _put_text(srt_key, srt_text, "application/x-subrip")
                 artifacts["srt_key"] = srt_key
+                try:
+                    artifacts["srt_url"] = _presign_get(srt_key)
+                except Exception:
+                    logger.debug("Presign SRT failed; continuing without URL", exc_info=True)
             except Exception:
                 logger.error("Failed uploading SRT", exc_info=True)
 
@@ -265,6 +336,10 @@ def run(job):
                 vtt_key = f"{PREFIX_TRANSCRIPTS}{stem}.vtt"
                 _put_text(vtt_key, vtt_text, "text/vtt")
                 artifacts["vtt_key"] = vtt_key
+                try:
+                    artifacts["vtt_url"] = _presign_get(vtt_key)
+                except Exception:
+                    logger.debug("Presign VTT failed; continuing without URL", exc_info=True)
             except Exception:
                 logger.error("Failed uploading VTT", exc_info=True)
 
@@ -275,11 +350,27 @@ def run(job):
         small_output.update(artifacts)
     else:
         # Fallback when S3 is not configured
-        segs = output_dict.get("segments")
+        segs = output_dict.get("segments") or []
+        preview = []
         if isinstance(segs, list):
-            small_output["segments"] = segs[:50]  # small slice to avoid large responses
-        else:
-            small_output["segments"] = segs
+            for s in segs[:50]:
+                try:
+                    start = float(s.get("start", 0))
+                except Exception:
+                    start = 0.0
+                try:
+                    end = float(s.get("end", 0))
+                except Exception:
+                    end = 0.0
+                text = s.get("text")
+                if not isinstance(text, str):
+                    text = str(text) if text is not None else ""
+                preview.append({
+                    "start": start,
+                    "end": end,
+                    "text": text[:500]
+                })
+        small_output["segments"] = preview
 
     # 6) Cleanup and return through RunPod helper
     try:
@@ -288,6 +379,12 @@ def run(job):
     except Exception:
         logger.warning("Cleanup issue", exc_info=True)
 
-    return {"output": small_output}
+    # Log return payload size to help diagnose 400s from control plane
+    try:
+        body = {"output": small_output}
+        approx_bytes = len(json.dumps(body, ensure_ascii=False))
+        logger.info(f"[RETURN] payload bytes ~ {approx_bytes}")
+    except Exception:
+        logger.warning("Failed to size return payload", exc_info=True)
 
-runpod.serverless.start({"handler": run})
+    return {"output": small_output}

@@ -1,4 +1,5 @@
 import os, pathlib, sys
+import runpod
 from . import rp_handler
 
 for p in [os.getenv("HF_HOME"),
@@ -14,3 +15,6 @@ print("[INIT] Caches:",
       "TRANSFORMERS_CACHE=", os.getenv("TRANSFORMERS_CACHE"),
       "TORCH_HOME=", os.getenv("TORCH_HOME"),
       flush=True)
+
+# Start serverless handler (clean separation from rp_handler import)
+runpod.serverless.start({"handler": rp_handler.run})

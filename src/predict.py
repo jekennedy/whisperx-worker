@@ -387,22 +387,41 @@ def align(audio, result, debug):
 
 def diarize(audio, result, debug, huggingface_access_token, min_speakers, max_speakers):
     start_time = time.time_ns() / 1e6
+    try:
+        # Newer WhisperX exposes diarization via submodule
+        from whisperx.diarize import DiarizationPipeline, assign_word_speakers
 
-    diarize_model = whisperx.DiarizationPipeline(model_name='pyannote/speaker-diarization@2.1',
-                                                 use_auth_token=huggingface_access_token, device=device)
-    diarize_segments = diarize_model(audio, min_speakers=min_speakers, max_speakers=max_speakers)
+        # Try with explicit model_name first, fall back if signature changed
+        try:
+            diarize_model = DiarizationPipeline(
+                model_name='pyannote/speaker-diarization@2.1',
+                use_auth_token=huggingface_access_token,
+                device=device,
+            )
+        except TypeError:
+            diarize_model = DiarizationPipeline(
+                use_auth_token=huggingface_access_token,
+                device=device,
+            )
 
-    result = whisperx.assign_word_speakers(diarize_segments, result)
+        diarize_segments = diarize_model(
+            audio,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
+        )
+        result = assign_word_speakers(diarize_segments, result)
 
-    if debug:
-        elapsed_time = time.time_ns() / 1e6 - start_time
-        print(f"Duration to diarize segments: {elapsed_time:.2f} ms")
+        if debug:
+            elapsed_time = time.time_ns() / 1e6 - start_time
+            print(f"Duration to diarize segments: {elapsed_time:.2f} ms")
 
-    gc.collect()
-    torch.cuda.empty_cache()
-    del diarize_model
-
-    return result
+        gc.collect()
+        torch.cuda.empty_cache()
+        del diarize_model
+        return result
+    except Exception as e:
+        print(f"[Predict] diarization skipped: {e}", flush=True)
+        return result
 
 def identify_speaker_for_segment(segment_embedding, known_embeddings, threshold=0.1):
     """
