@@ -237,6 +237,37 @@ docker build -t your-username/whisperx-worker:your-tag .
   - Set env `WHISPERX_MODEL=small` (or `medium`, `large-v3`, etc.).
   - If unset, the worker uses any preloaded local path (`WHISPERX_MODEL_DIR`, default `/app/models/faster-whisper-large-v3`).
 
+### Runtime Env Vars
+
+- Model selection
+  - `WHISPERX_MODEL` or `WHISPERX_MODEL_NAME`: model name (e.g., `small`, `large-v3`) or an absolute path.
+  - `WHISPERX_MODEL_DIR`: local directory to use if it contains `model.bin` (default `/app/models/faster-whisper-large-v3`).
+    - If the directory is missing `model.bin`, the worker falls back to a model name to auto‑download.
+- Device and precision
+  - `WHISPERX_DEVICE`: `auto` (default), `cpu`, or `cuda`.
+  - The worker selects `compute_type=float16` on GPU and `int8` on CPU automatically.
+- Hugging Face caches (recommended with a RunPod Network Volume)
+  - `HF_HOME`, `HUGGINGFACE_HUB_CACHE`, `TRANSFORMERS_CACHE`, `TORCH_HOME` → point these to your attached volume, e.g. `/runpod-volume/hf` and `/runpod-volume/torch`.
+  - First run downloads models to the volume; later runs reuse the cache for faster cold starts.
+
+### Diarization Notes
+
+- Set `HF_TOKEN` and accept terms for gated pyannote models to enable diarization.
+  - Gated repos: `pyannote/embedding`, `pyannote/speaker-diarization@2.1`.
+- If diarization models cannot be loaded (no token/terms), the worker logs a message and skips diarization; transcription still succeeds.
+- Speaker verification (SpeechBrain ECAPA) is lazy‑loaded on first use.
+
+### Local Testing
+
+- Build and run the included local harness on CPU with a small model:
+  - `DOCKER_BUILDKIT=1 docker build -t whisperx-worker:local .`
+  - `docker run --rm -it \`
+    `  -v "$PWD/tests:/app/tests" \`
+    `  -v "$PWD/samples:/app/samples" \`
+    `  -e WHISPERX_MODEL=small \`
+    `  whisperx-worker:local \`
+    `  python3 /app/tests/test_worker_local.py`
+
 ### Bundled VAD Model (optional)
 
 - To speed up VAD initialization, you may include the VAD file in the repo:
