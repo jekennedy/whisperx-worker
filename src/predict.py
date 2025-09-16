@@ -63,6 +63,11 @@ device = _resolve_device()
 compute_type = "float16" if device == "cuda" else "int8"
 
 try:
+    # If TMPDIR is set, direct tempfile to use it (helps avoid /tmp space issues)
+    _tmp = os.getenv("TMPDIR")
+    if _tmp:
+        os.makedirs(_tmp, exist_ok=True)
+        tempfile.tempdir = _tmp
     forced = os.getenv("WHISPERX_DEVICE")
     if forced == "cuda" and device != "cuda":
         print("[Predict] Requested CUDA but not available; falling back to CPU", flush=True)

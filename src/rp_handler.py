@@ -13,6 +13,8 @@ import json
 import shutil
 import logging
 from urllib.parse import urlparse
+from pathlib import Path
+import requests
 
 import boto3
 from botocore.client import Config
@@ -43,11 +45,28 @@ VAD_MODEL_PATH = os.getenv("VAD_MODEL_PATH")
 if VAD_MODEL_PATH and os.path.isfile(VAD_MODEL_PATH):
     os.environ["VAD_MODEL_PATH"] = VAD_MODEL_PATH
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return str(val).strip().lower() in {"1", "true", "yes", "on"}
+
 logger = logging.getLogger("rp_handler")
 logger.setLevel(logging.DEBUG)
 
 console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
+# Console level: CONSOLE_LOG_LEVEL wins, else DEBUG env enables DEBUG, else INFO
+_console_level_name = os.environ.get("CONSOLE_LOG_LEVEL", "").strip().upper()
+if not _console_level_name:
+    _console_level_name = "DEBUG" if _env_bool("DEBUG", False) else "INFO"
+_level_map = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+console_handler.setLevel(_level_map.get(_console_level_name, logging.INFO))
 console_formatter = logging.Formatter("%(asctime)s %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 console_handler.setFormatter(console_formatter)
 
@@ -95,6 +114,8 @@ PREFIX_TRANSCRIPTS     = os.environ.get("PREFIX_TRANSCRIPTS", "transcripts/")
 PRESIGN_TTL = int(os.environ.get("PRESIGN_TTL", "3600"))
 
 _s3 = None
+# Optional base dir for job downloads/scratch. Point this at your Network Volume mount
+JOBS_DIR = os.environ.get("JOBS_DIR", "/jobs").rstrip("/") or "/jobs"
 if all([STORAGE_ENDPOINT, STORAGE_BUCKET, STORAGE_ACCESS, STORAGE_SECRET]):
     try:
         _s3 = boto3.client(
@@ -120,8 +141,18 @@ MODEL.setup()
 # -----------------------------------------------------------------------------
 # Utilities
 # -----------------------------------------------------------------------------
-def cleanup_job_files(job_id, jobs_directory="/jobs"):
-    job_path = os.path.join(jobs_directory, job_id)
+def _disk_log(path: str):
+    try:
+        usage = shutil.disk_usage(path)
+        logger.info(
+            f"Disk at {path}: total={usage.total/1e9:.1f}GB used={usage.used/1e9:.1f}GB free={usage.free/1e9:.1f}GB"
+        )
+    except Exception:
+        logger.debug("disk usage probe failed", exc_info=True)
+
+def cleanup_job_files(job_id, jobs_directory: str = None):
+    base = jobs_directory or JOBS_DIR
+    job_path = os.path.join(base, job_id)
     if os.path.exists(job_path):
         try:
             shutil.rmtree(job_path)
@@ -154,6 +185,35 @@ def _put_json(key: str, obj):
         Body=json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8"),
         ContentType="application/json",
     )
+
+def _ensure_job_dir(job_id: str) -> Path:
+    base = Path(JOBS_DIR)
+    path = base / job_id / "input_objects"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+def _download_to_jobs(job_id: str, url: str) -> str:
+    """Download URL to JOBS_DIR/<job_id>/input_objects using streaming.
+    Returns file path as str.
+    """
+    dest_dir = _ensure_job_dir(job_id)
+    # derive name
+    try:
+        parsed = urlparse(url)
+        name = os.path.basename(parsed.path) or "input_audio"
+    except Exception:
+        name = "input_audio"
+    dest = dest_dir / name
+
+    _disk_log(str(dest_dir))
+    with requests.get(url, stream=True, timeout=180) as r:
+        r.raise_for_status()
+        with open(dest, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1024 * 1024):  # 1MB
+                if chunk:
+                    f.write(chunk)
+    logger.debug(f"Downloaded to {dest}")
+    return str(dest)
 
 def _presign_get(key: str) -> str:
     return _s3.generate_presigned_url(
@@ -212,9 +272,9 @@ def run(job):
         logger.info("FORCE_TINY_OUTPUT enabled; returning minimal payload.")
         return {"output": {"ok": True, "note": "tiny"}}
 
-    # 1) Download primary audio
+    # 1) Download primary audio into JOBS_DIR (Network Volume if configured)
     try:
-        audio_file_path = download_files_from_urls(job_id, [job_input["audio_file"]])[0]
+        audio_file_path = _download_to_jobs(job_id, job_input["audio_file"])
         logger.debug(f"Audio downloaded -> {audio_file_path}")
     except Exception as e:
         logger.error("Audio download failed", exc_info=True)
@@ -255,7 +315,8 @@ def run(job):
         "huggingface_access_token": job_input.get("huggingface_access_token") or hf_token,
         "min_speakers": job_input.get("min_speakers"),
         "max_speakers": job_input.get("max_speakers"),
-        "debug": job_input.get("debug", False),
+        # Default job-level debug to env DEBUG when not provided
+        "debug": job_input.get("debug", _env_bool("DEBUG", False)),
     }
 
     try:
@@ -374,7 +435,11 @@ def run(job):
 
     # 6) Cleanup and return through RunPod helper
     try:
-        rp_cleanup.clean(["input_objects"])
+        # rp_cleanup expects default /jobs; safe to ignore failures when JOBS_DIR differs
+        try:
+            rp_cleanup.clean(["input_objects"])
+        except Exception:
+            logger.debug("rp_cleanup skipped or failed", exc_info=True)
         cleanup_job_files(job_id)
     except Exception:
         logger.warning("Cleanup issue", exc_info=True)
