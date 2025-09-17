@@ -109,6 +109,38 @@ A serverless worker that provides high-quality speech transcription with timesta
     ]
   }
 }
+
+### Speaker Verification Tips (presigned URLs and naming)
+
+- URLs: Provide HTTP(S) URLs for `speaker_samples`. If your samples live in S3/R2, presign them first and pass the HTTPS link. Example presign (RunPod S3 API):
+
+```bash
+aws --endpoint-url https://s3api-<region>.runpod.io \
+    s3 presign s3://<bucket>/speaker-samples/swami-1.m4a --expires-in 86400
+```
+
+- Naming: If you omit `name`, the worker derives it from the sample URL in this order:
+  - Query parameter `?name=swami`
+  - Fragment `#swami`
+  - Filename stem (e.g., `swami-1`)
+
+- Example with derived names in URLs:
+
+```json
+{
+  "input": {
+    "audio_file": "https://…/minute.m4a",
+    "diarization": true,
+    "speaker_verification": true,
+    "speaker_samples": [
+      { "url": "https://…/swami-sample-1.m4a?name=swami" },
+      { "url": "https://…/swami-sample-2.m4a#swami" }
+    ]
+  }
+}
+```
+
+The worker enrolls each sample and relabels diarized segments to the most likely enrolled speaker name.
 ## Output Format
 
 The service returns a JSON object structured as follows:
@@ -249,6 +281,15 @@ docker build -t your-username/whisperx-worker:your-tag .
 - Hugging Face caches (recommended with a RunPod Network Volume)
   - `HF_HOME`, `HUGGINGFACE_HUB_CACHE`, `TRANSFORMERS_CACHE`, `TORCH_HOME` → point these to your attached volume, e.g. `/runpod-volume/hf` and `/runpod-volume/torch`.
   - First run downloads models to the volume; later runs reuse the cache for faster cold starts.
+
+- Scratch and downloads (avoid filling root filesystem)
+  - `JOBS_DIR` — where input audio and job files are stored (e.g., `/runpod-volume/jobs`).
+  - `TMPDIR` — where temporary files are written (e.g., `/runpod-volume/tmp`).
+
+- Logging and diagnostics
+  - `DEBUG=1` — switch console logs to DEBUG and default job-level `debug` to true if not provided in input.
+  - `CONSOLE_LOG_LEVEL=INFO|DEBUG|WARNING|ERROR|CRITICAL` — explicit console verbosity.
+  - `PRINT_MOUNTS=1` — print `df -h` at startup to show mounts and free space.
 
 ### Diarization Notes
 
