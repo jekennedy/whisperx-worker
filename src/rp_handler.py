@@ -332,8 +332,17 @@ def run(job):
             logger.error("Enrollment failed", exc_info=True)
 
     # 3) WhisperX / diarization
+    # Clip beam_size into a reasonable range if provided
+    _beam = job_input.get("beam_size")
+    if _beam is not None:
+        try:
+            _beam = max(1, min(10, int(_beam)))
+        except Exception:
+            _beam = None
+
     predict_input = {
         "audio_file": audio_file_path,
+        "beam_size": _beam,
         "language": job_input.get("language"),
         "language_detection_min_prob": job_input.get("language_detection_min_prob", 0),
         "language_detection_max_tries": job_input.get("language_detection_max_tries", 5),
@@ -350,6 +359,23 @@ def run(job):
         # Default job-level debug to env DEBUG when not provided
         "debug": job_input.get("debug", _env_bool("DEBUG", False)),
     }
+
+    # Log effective ASR knobs for this job (info-level)
+    try:
+        logger.info(
+            "ASR opts | beam_size=%s temp=%s batch=%s lang=%s vad_onset=%.3f vad_offset=%.3f prompt=%s align=%s diar=%s",
+            predict_input.get("beam_size"),
+            predict_input.get("temperature"),
+            predict_input.get("batch_size"),
+            predict_input.get("language"),
+            float(predict_input.get("vad_onset") or 0),
+            float(predict_input.get("vad_offset") or 0),
+            bool(predict_input.get("initial_prompt")),
+            bool(predict_input.get("align_output")),
+            bool(predict_input.get("diarization")),
+        )
+    except Exception:
+        pass
 
     try:
         result: Output = MODEL.predict(**predict_input)

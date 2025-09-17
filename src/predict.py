@@ -127,6 +127,10 @@ class Predictor(BasePredictor):
     def predict(
             self,
             audio_file: Path = Input(description="Audio file"),
+            beam_size: int | None = Input(
+                description="Beam size for decoding (None or 1 for greedy).",
+                default=None
+            ),
             language: str = Input(
                 description="ISO code of the language spoken in the audio, specify None to perform language detection",
                 default=None),
@@ -187,9 +191,17 @@ class Predictor(BasePredictor):
     ) -> Output:
         with torch.inference_mode():
             asr_options = {
-                "temperatures": [temperature],
-                "initial_prompt": initial_prompt
+                "temperature": float(temperature),
+                "initial_prompt": initial_prompt,
+                "condition_on_previous_text": True,
             }
+            if beam_size is not None:
+                try:
+                    bs = int(beam_size)
+                    if bs >= 1:
+                        asr_options["beam_size"] = bs
+                except Exception:
+                    pass
 
             vad_options = {
                 "vad_onset": vad_onset,

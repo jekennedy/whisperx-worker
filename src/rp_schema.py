@@ -5,6 +5,7 @@ INPUT_VALIDATIONS = {
     'language_detection_max_tries': {'type': int,   'required': False, 'default': 5},
     'initial_prompt': {'type': str, 'required': False, 'default': None},
     'batch_size':     {'type': int, 'required': False, 'default': 64},
+    'beam_size':      {'type': int, 'required': False, 'default': None},
     'temperature':    {'type': float,'required': False, 'default': 0.0},
     'vad_onset':      {'type': float,'required': False, 'default': 0.500},
     'vad_offset':     {'type': float,'required': False, 'default': 0.363},
