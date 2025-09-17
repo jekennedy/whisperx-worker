@@ -12,7 +12,7 @@ import sys
 import json
 import shutil
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from pathlib import Path
 import requests
 
@@ -281,6 +281,7 @@ def run(job):
         return {"error": f"audio download: {e}"}
 
     # 2) Speaker profiles optional
+    # Normalize speaker profiles: derive a friendly name from URL if not provided
     speaker_profiles = job_input.get("speaker_samples", [])
     embeddings = {}
     if speaker_profiles:
@@ -290,9 +291,40 @@ def run(job):
             identify_speakers_on_segments,
             relabel_speakers_by_avg_similarity,
         )
+        def _derive_name(u: str, idx: int) -> str:
+            try:
+                p = urlparse(u)
+                qn = parse_qs(p.query).get("name")
+                if qn and qn[0].strip():
+                    return qn[0].strip()
+                if p.fragment and p.fragment.strip():
+                    return p.fragment.strip()
+                base = os.path.basename(p.path)
+                stem, _ = os.path.splitext(base)
+                if stem:
+                    return stem[:64]
+            except Exception:
+                pass
+            return f"spk{idx+1}"
+
+        # Build normalized list with explicit names
+        norm_profiles = []
+        for i, s in enumerate(speaker_profiles):
+            if isinstance(s, str):
+                norm_profiles.append({"name": _derive_name(s, i), "url": s})
+            elif isinstance(s, dict):
+                u = s.get("url", "")
+                n = s.get("name") or _derive_name(u, i)
+                # keep file_path if caller provided a local file
+                ent = {"name": n, "url": u}
+                if s.get("file_path"):
+                    ent["file_path"] = s["file_path"]
+                norm_profiles.append(ent)
+            else:
+                logger.warning(f"Unsupported speaker sample entry: {s!r}")
         try:
             embeddings = load_known_speakers_from_samples(
-                speaker_profiles,
+                norm_profiles,
                 huggingface_access_token=job_input.get("huggingface_access_token") or hf_token
             )
             logger.info(f"Enrolled {len(embeddings)} speaker profiles successfully.")
