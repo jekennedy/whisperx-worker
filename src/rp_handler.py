@@ -349,6 +349,11 @@ def run(job):
         "initial_prompt": job_input.get("initial_prompt"),
         "batch_size": job_input.get("batch_size", 64),
         "temperature": job_input.get("temperature", 0),
+        "patience": job_input.get("patience"),
+        "length_penalty": job_input.get("length_penalty"),
+        "no_speech_threshold": job_input.get("no_speech_threshold"),
+        "log_prob_threshold": job_input.get("log_prob_threshold"),
+        "compression_ratio_threshold": job_input.get("compression_ratio_threshold"),
         "vad_onset": job_input.get("vad_onset", 0.50),
         "vad_offset": job_input.get("vad_offset", 0.363),
         "align_output": job_input.get("align_output", False),
@@ -363,7 +368,7 @@ def run(job):
     # Log effective ASR knobs for this job (info-level)
     try:
         logger.info(
-            "ASR opts | beam_size=%s temp=%s batch=%s lang=%s vad_onset=%.3f vad_offset=%.3f prompt=%s align=%s diar=%s",
+            "ASR opts | beam=%s temp=%s batch=%s lang=%s vad_onset=%.3f vad_offset=%.3f prompt=%s align=%s diar=%s patience=%s len_pen=%s no_speech=%s log_prob=%s comp_ratio=%s",
             predict_input.get("beam_size"),
             predict_input.get("temperature"),
             predict_input.get("batch_size"),
@@ -373,6 +378,11 @@ def run(job):
             bool(predict_input.get("initial_prompt")),
             bool(predict_input.get("align_output")),
             bool(predict_input.get("diarization")),
+            predict_input.get("patience"),
+            predict_input.get("length_penalty"),
+            predict_input.get("no_speech_threshold"),
+            predict_input.get("log_prob_threshold"),
+            predict_input.get("compression_ratio_threshold"),
         )
     except Exception:
         pass
