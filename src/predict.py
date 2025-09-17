@@ -210,18 +210,23 @@ class Predictor(BasePredictor):
             )
     ) -> Output:
         with torch.inference_mode():
+            # Compatibility with WhisperX TranscriptionOptions: expects 'temperatures' (list)
             asr_options = {
-                "temperature": float(temperature),
                 "initial_prompt": initial_prompt,
                 "condition_on_previous_text": True,
             }
+            # Beam vs greedy: in beam mode, do NOT pass temperatures
+            _bs = None
             if beam_size is not None:
                 try:
-                    bs = int(beam_size)
-                    if bs >= 1:
-                        asr_options["beam_size"] = bs
+                    _bs = int(beam_size)
                 except Exception:
-                    pass
+                    _bs = None
+            if _bs is not None and _bs >= 2:
+                asr_options["beam_size"] = _bs
+            else:
+                # Greedy/sampling path uses 'temperatures' list as expected by WhisperX TranscriptionOptions
+                asr_options["temperatures"] = [float(temperature)]
             # Optional advanced knobs
             if patience is not None:
                 try:
