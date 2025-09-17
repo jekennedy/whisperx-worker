@@ -332,14 +332,28 @@ def run(job):
             logger.error("Enrollment failed", exc_info=True)
 
     # 3) WhisperX / diarization
+    # Clip beam_size into a reasonable range if provided
+    _beam = job_input.get("beam_size")
+    if _beam is not None:
+        try:
+            _beam = max(1, min(10, int(_beam)))
+        except Exception:
+            _beam = None
+
     predict_input = {
         "audio_file": audio_file_path,
+        "beam_size": _beam,
         "language": job_input.get("language"),
         "language_detection_min_prob": job_input.get("language_detection_min_prob", 0),
         "language_detection_max_tries": job_input.get("language_detection_max_tries", 5),
         "initial_prompt": job_input.get("initial_prompt"),
         "batch_size": job_input.get("batch_size", 64),
         "temperature": job_input.get("temperature", 0),
+        "patience": job_input.get("patience"),
+        "length_penalty": job_input.get("length_penalty"),
+        "no_speech_threshold": job_input.get("no_speech_threshold"),
+        "log_prob_threshold": job_input.get("log_prob_threshold"),
+        "compression_ratio_threshold": job_input.get("compression_ratio_threshold"),
         "vad_onset": job_input.get("vad_onset", 0.50),
         "vad_offset": job_input.get("vad_offset", 0.363),
         "align_output": job_input.get("align_output", False),
@@ -350,6 +364,28 @@ def run(job):
         # Default job-level debug to env DEBUG when not provided
         "debug": job_input.get("debug", _env_bool("DEBUG", False)),
     }
+
+    # Log effective ASR knobs for this job (info-level)
+    try:
+        logger.info(
+            "ASR opts | beam=%s temp=%s batch=%s lang=%s vad_onset=%.3f vad_offset=%.3f prompt=%s align=%s diar=%s patience=%s len_pen=%s no_speech=%s log_prob=%s comp_ratio=%s",
+            predict_input.get("beam_size"),
+            predict_input.get("temperature"),
+            predict_input.get("batch_size"),
+            predict_input.get("language"),
+            float(predict_input.get("vad_onset") or 0),
+            float(predict_input.get("vad_offset") or 0),
+            bool(predict_input.get("initial_prompt")),
+            bool(predict_input.get("align_output")),
+            bool(predict_input.get("diarization")),
+            predict_input.get("patience"),
+            predict_input.get("length_penalty"),
+            predict_input.get("no_speech_threshold"),
+            predict_input.get("log_prob_threshold"),
+            predict_input.get("compression_ratio_threshold"),
+        )
+    except Exception:
+        pass
 
     try:
         result: Output = MODEL.predict(**predict_input)

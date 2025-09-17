@@ -127,6 +127,30 @@ class Predictor(BasePredictor):
     def predict(
             self,
             audio_file: Path = Input(description="Audio file"),
+            beam_size: int | None = Input(
+                description="Beam size for decoding (None or 1 for greedy).",
+                default=None
+            ),
+            patience: float | None = Input(
+                description="Beam search patience (0-1); small >0 can marginally improve quality.",
+                default=None
+            ),
+            length_penalty: float | None = Input(
+                description="Beam search length penalty (e.g., 1.0).",
+                default=None
+            ),
+            no_speech_threshold: float | None = Input(
+                description="Threshold for no-speech probability (use defaults unless needed).",
+                default=None
+            ),
+            log_prob_threshold: float | None = Input(
+                description="Threshold for average log probability (use defaults unless needed).",
+                default=None
+            ),
+            compression_ratio_threshold: float | None = Input(
+                description="Threshold for gzip compression ratio (use defaults unless needed).",
+                default=None
+            ),
             language: str = Input(
                 description="ISO code of the language spoken in the audio, specify None to perform language detection",
                 default=None),
@@ -187,9 +211,49 @@ class Predictor(BasePredictor):
     ) -> Output:
         with torch.inference_mode():
             asr_options = {
-                "temperatures": [temperature],
-                "initial_prompt": initial_prompt
+                "temperature": float(temperature),
+                "initial_prompt": initial_prompt,
+                "condition_on_previous_text": True,
             }
+            if beam_size is not None:
+                try:
+                    bs = int(beam_size)
+                    if bs >= 1:
+                        asr_options["beam_size"] = bs
+                except Exception:
+                    pass
+            # Optional advanced knobs
+            if patience is not None:
+                try:
+                    p = float(patience)
+                    if p >= 0:
+                        asr_options["patience"] = p
+                except Exception:
+                    pass
+            if length_penalty is not None:
+                try:
+                    lp = float(length_penalty)
+                    asr_options["length_penalty"] = lp
+                except Exception:
+                    pass
+            if no_speech_threshold is not None:
+                try:
+                    ns = float(no_speech_threshold)
+                    asr_options["no_speech_threshold"] = ns
+                except Exception:
+                    pass
+            if log_prob_threshold is not None:
+                try:
+                    lpt = float(log_prob_threshold)
+                    asr_options["log_prob_threshold"] = lpt
+                except Exception:
+                    pass
+            if compression_ratio_threshold is not None:
+                try:
+                    crt = float(compression_ratio_threshold)
+                    asr_options["compression_ratio_threshold"] = crt
+                except Exception:
+                    pass
 
             vad_options = {
                 "vad_onset": vad_onset,
