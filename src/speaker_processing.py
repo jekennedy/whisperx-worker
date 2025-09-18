@@ -179,11 +179,15 @@ def load_known_speakers_from_samples(speaker_samples,  huggingface_access_token=
         elif url:
             try:
                 logger.debug(f"Downloading speaker sample '{name}' from URL: {url}")
-                response = requests.get(url)
+                response = requests.get(url, timeout=180)
                 response.raise_for_status()
-                suffix = os.path.splitext(url)[1]
-                if not suffix:
-                    suffix = ".wav"
+                # Use only the URL path to derive a short, safe suffix; ignore query params in presigned URLs
+                from urllib.parse import urlparse
+                path = urlparse(url).path or ""
+                suffix = os.path.splitext(path)[1]
+                # Fallback to a sane extension if missing or suspicious/too long
+                if not suffix or not suffix.startswith(".") or len(suffix) > 10:
+                    suffix = ".m4a"
                 with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
                     tmp.write(response.content)
                     tmp.flush()
